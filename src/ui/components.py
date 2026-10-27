@@ -9,6 +9,8 @@ import pandas as pd
 import streamlit as st
 
 from src.ingestion.fit_loader import load_fit, prepare_records
+from src.ingestion.garmin_sync import SYNC_START
+from src.processing.metrics import calculate_metrics
 from src.processing.metrics import format_number as fmt
 from src.visualization.theme import ACCENT, BORDER, CARD, TEXT_MUTED, TEXT_PRIMARY, TEXT_SECONDARY
 
@@ -32,22 +34,59 @@ def list_fit_files() -> list[Path]:
     return sorted(FIT_FOLDER.glob("*.fit"))
 
 
-@st.cache_data(show_spinner="Leyendo archivo FIT...")
+@st.cache_data(show_spinner="Leyendo actividad...")
 def _load_from_path(path: str, modified: float) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     raw, session = load_fit(path)
+    session["source"] = "Garmin Connect" if Path(path).name.startswith("garmin_") else "Archivo FIT"
     return raw, prepare_records(raw), session
 
 
 @st.cache_data(show_spinner="Leyendo archivo FIT...")
 def load_from_bytes(data: bytes) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     raw, session = load_fit(data)
+    session["source"] = "Archivo subido"
     return raw, prepare_records(raw), session
 
 
 def load_from_path(path: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """Carga un archivo .fit. Retorna (raw, records, session)."""
     # La fecha de modificación forma parte de la clave de caché:
     # si el archivo cambia, se vuelve a leer.
     return _load_from_path(str(path), path.stat().st_mtime)
+
+
+def list_activities() -> list[dict]:
+    """Actividades desde el inicio de la temporada (SYNC_START), de la más reciente a la más antigua.
+
+    Si una salida está repetida (misma hora de inicio ±2 min, por ejemplo copiada a
+    mano y también descargada de Garmin Connect) se muestra una sola vez.
+    """
+    season_start = datetime.combine(SYNC_START, datetime.min.time())
+    activities = []
+    for path in list_fit_files():
+        _, records, session = load_from_path(path)
+        if records.empty:
+            continue
+        m = calculate_metrics(session)
+        if m["start_time"] is None or m["start_time"] < season_start:
+            continue
+        activities.append({
+            "path": path,
+            "source": session.get("source"),
+            "start": m["start_time"] or datetime.min,
+            "label": f"{format_date(m['start_time'])} · {fmt(m['distance_km'], 1)} km",
+            "summary": m,
+            "session": session,
+        })
+
+    unique: list[dict] = []
+    for activity in activities:
+        duplicate = any(
+            abs((activity["start"] - other["start"]).total_seconds()) < 120 for other in unique
+        )
+        if not duplicate:
+            unique.append(activity)
+    return sorted(unique, key=lambda a: a["start"], reverse=True)
 
 
 # ---------- Estilos y componentes visuales ----------

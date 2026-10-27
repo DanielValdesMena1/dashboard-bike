@@ -8,5 +8,8 @@ venv/
 Thumbs.db
 
 # Datos personales de actividades (contienen ubicación GPS)
-data/raw/fit/*.fit
+data/raw/fit/*
 !data/raw/fit/.gitkeep
+
+# Sesión de Garmin Connect
+.secrets/

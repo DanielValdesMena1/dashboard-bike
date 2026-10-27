@@ -46,7 +46,7 @@ def generate_insights(
             )
 
     if "power_w" in records and records["power_w"].notna().any():
-        coasting = (records["power_w"].fillna(0) == 0).mean() * 100
+        coasting = (records["power_w"].dropna() == 0).mean() * 100
         if coasting >= 10:
             insights.append(f"Pasaste un **{coasting:.0f}%** del tiempo sin pedalear (bajadas, semáforos o rueda).")
 

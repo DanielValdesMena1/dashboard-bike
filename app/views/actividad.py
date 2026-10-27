@@ -1,5 +1,4 @@
 import sys
-from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -16,7 +15,7 @@ from src.processing.performance import (
     HR_ZONES, POWER_ZONES, performance_summary, power_curve, splits, time_in_zones,
 )
 from src.ui.components import (
-    fmt, format_date, hero, kpi_cards, list_fit_files,
+    fmt, format_date, hero, kpi_cards, list_activities,
     load_from_bytes, load_from_path, section,
 )
 from src.visualization.charts import performance_chart, power_curve_chart, splits_chart, zones_chart
@@ -24,14 +23,12 @@ from src.visualization.maps import COLOR_OPTIONS, build_route_map
 from src.visualization.theme import METRIC_COLORS, ORANGE_RAMP, RED_RAMP
 
 SPORT_NAMES = {"cycling": "Ciclismo", "running": "Carrera", "walking": "Caminata", "hiking": "Senderismo"}
+SOURCE_TAGS = {"Garmin Connect": "Garmin", "Archivo FIT": "FIT"}
 
 
 # ---------- Barra lateral: selección de actividad y parámetros ----------
 
 with st.sidebar:
-    st.markdown("## 🚴 Ride Analytics")
-    st.caption("Análisis de actividades de ciclismo a partir de archivos FIT de Garmin.")
-
     source = st.radio("Origen de datos", ["Mis actividades", "Subir archivo"], horizontal=True)
 
     raw = records = session = None
@@ -40,25 +37,21 @@ with st.sidebar:
         if uploaded is not None:
             raw, records, session = load_from_bytes(uploaded.getvalue())
     else:
-        files = list_fit_files()
-        if files:
-            # Etiqueta legible -> archivo (el nombre del archivo evita etiquetas repetidas)
-            options = []
-            for path in files:
-                _, _, s = load_from_path(path)
-                m = calculate_metrics(s)
-                label = f"{format_date(m['start_time'])} · {fmt(m['distance_km'], 1)} km"
-                options.append((m["start_time"] or datetime.min, label, path))
-            # La más reciente primero; si dos etiquetas coinciden se añade el nombre del archivo
+        activities = list_activities()
+        if activities:
+            # Etiqueta legible -> archivo (la más reciente primero)
             by_label = {}
-            for _, label, path in sorted(options, key=lambda o: o[0], reverse=True):
-                by_label[label if label not in by_label else f"{label} ({path.stem})"] = path
+            for a in activities:
+                label = f"{a['label']} · {SOURCE_TAGS.get(a['source'], '')}".rstrip(" ·")
+                if label in by_label:
+                    label = f"{label} ({a['path'].stem})"
+                by_label[label] = a["path"]
             selected = st.selectbox("Actividad", list(by_label))
             raw, records, session = load_from_path(by_label[selected])
 
 if records is None:
     hero("Ride Analytics", "Sin actividades cargadas",
-         "Sube un archivo .fit desde la barra lateral o colócalo en data/raw/fit.")
+         "Conecta Garmin Connect, sube un archivo .fit desde la barra lateral o colócalo en data/raw/fit.")
     st.stop()
 
 if records.empty:
@@ -85,17 +78,18 @@ has_hr = "heart_rate" in records and records["heart_rate"].notna().any()
 
 perf = performance_summary(records, ftp, summary["duration_s"])
 curve = power_curve(records["power_w"]) if has_power else None
-power_zones = time_in_zones(records["power_w"].fillna(0), ftp, POWER_ZONES) if has_power else None
+power_zones = time_in_zones(records["power_w"], ftp, POWER_ZONES) if has_power else None
 hr_zones = time_in_zones(records["heart_rate"], hr_max, HR_ZONES) if has_hr else None
 
 # ---------- Encabezado y KPIs ----------
 
 subtitle = (
-    f"{format_date(summary['start_time'], with_time=True)} · "
+    (f"{session['name']} · " if session.get("name") else "")
+    + f"{format_date(summary['start_time'], with_time=True)} · "
     f"Tiempo total {format_duration(summary['elapsed_s'])} · {len(records):,} registros".replace(",", ".")
 )
 sport = SPORT_NAMES.get(summary["sport"], str(summary["sport"] or "Actividad").capitalize())
-hero(sport, f"{fmt(summary['distance_km'], 1)} km de ruta", subtitle)
+hero(f"{sport} · {session.get('source', '')}".rstrip(" ·"), f"{fmt(summary['distance_km'], 1)} km de ruta", subtitle)
 
 kpi_cards([
     {"label": "Distancia", "value": fmt(summary["distance_km"], 1), "unit": "km", "color": METRIC_COLORS["speed_kmh"]},
@@ -209,23 +203,28 @@ with tab_splits:
 with tab_data:
     section("Validación de los cálculos",
             "Las métricas avanzadas se calculan desde los datos segundo a segundo y se comparan con las que calculó el dispositivo.")
+    reference = "Dispositivo"
     checks = pd.DataFrame([
-        {"Métrica": "Potencia normalizada (W)", "Calculado": perf["np_w"], "Dispositivo": summary["device_np_w"]},
-        {"Métrica": "Intensity Factor", "Calculado": perf["intensity_factor"], "Dispositivo": summary["device_if"]},
-        {"Métrica": "TSS", "Calculado": perf["tss"], "Dispositivo": summary["device_tss"]},
-        {"Métrica": "Potencia media (W)", "Calculado": records["power_w"].fillna(0).mean() if has_power else None,
-         "Dispositivo": summary["avg_power_w"]},
+        {"Métrica": "Potencia normalizada (W)", "Calculado": perf["np_w"], reference: summary["device_np_w"]},
+        {"Métrica": "Intensity Factor", "Calculado": perf["intensity_factor"], reference: summary["device_if"]},
+        {"Métrica": "TSS", "Calculado": perf["tss"], reference: summary["device_tss"]},
+        {"Métrica": "Potencia media (W)", "Calculado": records["power_w"].mean() if has_power else None,
+         reference: summary["avg_power_w"]},
         {"Métrica": "FC media (bpm)", "Calculado": records["heart_rate"].mean() if has_hr else None,
-         "Dispositivo": summary["avg_heart_rate"]},
-    ])
-    checks["Diferencia %"] = (checks["Calculado"] - checks["Dispositivo"]) / checks["Dispositivo"] * 100
+         reference: summary["avg_heart_rate"]},
+    ]).dropna()
+    checks["Diferencia %"] = (checks["Calculado"] - checks[reference]) / checks[reference] * 100
     st.dataframe(
         checks, hide_index=True, width="stretch",
         column_config={
             "Calculado": st.column_config.NumberColumn(format="%.2f"),
-            "Dispositivo": st.column_config.NumberColumn(format="%.2f"),
+            reference: st.column_config.NumberColumn(format="%.2f"),
             "Diferencia %": st.column_config.NumberColumn(format="%+.2f%%"),
         },
+    )
+    st.caption(
+        "El dispositivo muestra la potencia normalizada redondeada hacia arriba "
+        "(p. ej. 165,1 W → 166 W); el IF y el TSS del dispositivo usan sus valores internos."
     )
     if summary["device_ftp_w"] and ftp != summary["device_ftp_w"]:
         st.caption(f"⚠️ IF y TSS del dispositivo usan su FTP ({summary['device_ftp_w']:.0f} W); aquí estás usando {ftp} W.")

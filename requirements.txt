@@ -6,4 +6,5 @@ folium>=0.17
 branca>=0.7
 streamlit-folium>=0.22
 fitparse>=1.2
+garminconnect>=0.3.5
 pytest>=8.0

@@ -21,6 +21,12 @@ def test_normalized_power_rewards_variable_efforts():
     assert normalized_power(variable) > 250
 
 
+def test_normalized_power_ignores_sensor_dropouts():
+    # Un corte del sensor (NaN) no debe contar como 0 W
+    power = pd.Series([200.0] * 300 + [np.nan] * 20 + [200.0] * 300)
+    assert normalized_power(power) == pytest.approx(200.0)
+
+
 def test_normalized_power_needs_at_least_30_seconds():
     assert normalized_power(pd.Series([200.0] * 10)) is None
 

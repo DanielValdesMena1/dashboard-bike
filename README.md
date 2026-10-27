@@ -21,6 +21,23 @@ Dashboard interactivo que transforma los archivos `.fit` de un ciclocomputador G
 ![Zonas de entrenamiento](docs/screenshots/zonas.png)
 ![Historial](docs/screenshots/historial.png)
 
+## Sincronización con Garmin Connect
+
+El dashboard descarga automáticamente las salidas desde **Garmin Connect** y analiza la temporada actual: **del 25 de septiembre de 2026 en adelante** (la fecha está en `SYNC_START`, en `src/ingestion/garmin_sync.py`). Las actividades anteriores no se muestran; la subida manual de un `.fit` desde la barra lateral sigue funcionando para cualquier fecha.
+
+- **Archivo original:** se descarga el FIT tal como lo grabó el dispositivo, así que todo el análisis y la validación funcionan igual que con un archivo copiado a mano.
+- **Sincronización incremental:** al abrir el dashboard (si pasaron más de 15 min) o con *Sincronizar ahora*. Solo se descarga lo nuevo, revisando además la última semana por si alguna salida se subió con retraso.
+- **Tolerante a fallos:** las actividades se procesan en orden cronológico y se guardan una a una. Si Garmin limita las peticiones o se corta la red, la siguiente sincronización continúa donde quedó y el dashboard sigue funcionando con lo que ya tiene.
+- **Credenciales:** la contraseña solo se usa para el primer inicio de sesión y no se guarda. Se guardan los tokens de sesión en `.secrets/` (excluido de git). Soporta verificación en dos pasos.
+
+Para conectarla, abre *⌚ Garmin Connect → Conectar cuenta* en la barra lateral. También se puede sincronizar (e iniciar sesión la primera vez) desde la terminal:
+
+```bash
+python scripts/sync_garmin.py
+```
+
+> Usa [`garminconnect`](https://github.com/cyberjunky/python-garminconnect), una librería no oficial: si Garmin cambia su sistema de acceso puede dejar de funcionar temporalmente. La carga manual de archivos `.fit` sigue disponible como respaldo.
+
 ## Métricas calculadas
 
 Todas las métricas avanzadas se calculan **desde los datos crudos segundo a segundo** (no se copian del resumen de Garmin):
@@ -34,15 +51,26 @@ Todas las métricas avanzadas se calculan **desde los datos crudos segundo a seg
 
 ### Validación
 
-Mis cálculos se comparan con los valores que calcula el propio Garmin y quedan dentro de un **±0,5 %**:
+Mis cálculos se comparan con los que hace el propio Garmin en cada salida de la temporada:
 
-| Actividad | NP calculada | NP Garmin | TSS calculado | TSS Garmin |
+- **Potencia normalizada:** coincide **exactamente en las 11 salidas**. Al investigar una pequeña diferencia sistemática encontré dos causas: los cortes del sensor de potencia deben excluirse (no son 0 W) y Garmin muestra la NP **redondeada hacia arriba**.
+- **TSS:** dentro de ±1,2 % en casi todas las salidas. Garmin lo calcula con sus valores internos (NP sin redondear y su propia duración), así que se acepta hasta un 3 %.
+
+| Salida | NP calculada | NP Garmin | TSS calculado | TSS Garmin |
 |---|---|---|---|---|
-| 06 ene 2026 | 201,6 W | 202 W | 86,9 | 87,2 |
-| 08 ene 2026 | 219,7 W | 220 W | 142,3 | 142,2 |
-| 10 ene 2026 | 209,5 W | 210 W | 184,4 | 184,6 |
+| 25 sep | 202,3 W | 203 W | 107,4 | 107,7 |
+| 28 sep | 161,0 W | 161 W | 34,4 | 34,3 |
+| 29 sep | 171,7 W | 172 W | 79,7 | 77,9 |
+| 02 oct | 168,2 W | 169 W | 38,9 | 39,0 |
+| 03 oct | 162,2 W | 163 W | 110,2 | 111,0 |
+| 07 oct | 165,1 W | 166 W | 61,6 | 62,3 |
+| 09 oct | 175,1 W | 176 W | 39,7 | 39,4 |
+| 10 oct | 222,6 W | 223 W | 173,1 | 173,2 |
+| 14 oct | 168,2 W | 169 W | 80,7 | 81,2 |
+| 15 oct | 141,4 W | 142 W | 28,0 | 27,9 |
+| 17 oct | 226,7 W | 227 W | 209,2 | 209,3 |
 
-Esta comparación también corre como test automático (`tests/test_ingestion_metrics.py`).
+Esta comparación corre como test automático sobre cada archivo (`tests/test_ingestion_metrics.py`).
 
 ## Arquitectura
 
@@ -54,6 +82,7 @@ archivo .fit
    ▼
 src/ingestion/      fit_loader.py   → Lee el FIT, convierte unidades (semicírculos → grados,
    │                                  m/s → km/h), ajusta la hora UTC a hora local
+   │                garmin_sync.py  → Descarga incremental de los FIT desde Garmin Connect
    ▼
 src/processing/     metrics.py      → Resumen de la sesión (tolerante a sensores faltantes)
    │                performance.py  → NP, IF, TSS, zonas, curva de potencia, parciales
@@ -78,7 +107,8 @@ dashboard-bike/
 │   ├── ingestion/fit_loader.py
 │   ├── processing/{metrics,performance,insights}.py
 │   ├── visualization/{charts,maps,theme}.py
-│   └── ui/components.py         ← Tarjetas KPI, estilos y carga con caché
+│   └── ui/                      ← Tarjetas KPI, estilos, carga con caché y panel de Garmin
+├── scripts/sync_garmin.py       ← Sincronización desde la terminal
 ├── tests/
 ├── data/raw/fit/                ← Archivos .fit
 ├── .streamlit/config.toml       ← Tema oscuro
@@ -117,10 +147,10 @@ La validación contra Garmin se ejecuta solo si hay archivos `.fit` en `data/raw
 
 ## Tecnologías
 
-Python · pandas · NumPy · Streamlit · Plotly · Folium · fitparse · pytest
+Python · pandas · NumPy · Streamlit · Plotly · Folium · fitparse · garminconnect · pytest
 
 ## Próximos pasos
 
 - Carga crónica y aguda (CTL / ATL / TSB) para modelar la forma física en el tiempo.
 - Detección automática de subidas y cálculo de VAM.
-- Conexión directa con la API de Garmin o Strava.
+- Tarea programada para sincronizar Garmin sin abrir el dashboard.

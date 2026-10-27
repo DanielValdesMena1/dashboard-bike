@@ -44,8 +44,12 @@ def duration_label(seconds: int) -> str:
 
 def normalized_power(power: pd.Series) -> float | None:
     """Potencia normalizada (NP): media móvil de 30 s, elevada a la 4ª,
-    promediada y con raíz 4ª. Pondera más los esfuerzos intensos."""
-    power = power.fillna(0)
+    promediada y con raíz 4ª. Pondera más los esfuerzos intensos.
+
+    Las lecturas perdidas del sensor (NaN) se excluyen: no son 0 W, sino datos
+    que faltan. Garmin muestra este mismo valor redondeado hacia arriba.
+    """
+    power = power.dropna().reset_index(drop=True)
     if len(power) < 30:
         return None
     rolling = power.rolling(30).mean().dropna()
@@ -154,7 +158,7 @@ def performance_summary(df: pd.DataFrame, ftp_w: float, duration_s: float | None
     }
     if "power_w" in df.columns and df["power_w"].notna().any():
         np_w = normalized_power(df["power_w"])
-        avg_w = df["power_w"].fillna(0).mean()
+        avg_w = df["power_w"].mean()  # Sin lecturas perdidas, igual que la NP
         result["np_w"] = np_w
         result.update(training_load(np_w, ftp_w, duration_s or len(df)))
         if np_w and avg_w:

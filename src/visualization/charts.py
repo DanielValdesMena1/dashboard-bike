@@ -137,13 +137,15 @@ def history_bar(history: pd.DataFrame, column: str, title: str, unit: str, color
     fig = go.Figure(go.Bar(
         x=history["etiqueta"], y=history[column],
         marker=dict(color=color, cornerradius=4, line=dict(width=0)),
-        text=[format_number(v) for v in history[column]], textposition="outside",
+        text=[format_number(v) for v in history[column]] if len(history) <= 12 else None,
+        textposition="outside",
         textfont=dict(color=TEXT_PRIMARY),
         hovertemplate=f"<b>%{{x}}</b><br>%{{y:.1f}} {unit}<extra></extra>",
     ))
     fig.update_layout(**base_layout(
         height=320, title=dict(text=title, font=dict(color=TEXT_PRIMARY, size=15)),
-        bargap=0.35, yaxis=dict(gridcolor=GRID, range=[0, history[column].max() * 1.18]),
+        bargap=0.35, yaxis=dict(gridcolor=GRID, rangemode="tozero",
+                                range=[0, top * 1.18] if (top := history[column].max()) > 0 else None),
         xaxis=dict(type="category"),
     ))
     return fig
@@ -156,7 +158,8 @@ def history_trend(history: pd.DataFrame, column: str, title: str, decimals: int,
         x=history["etiqueta"], y=values, mode="lines+markers+text",
         line=dict(color=color, width=2),
         marker=dict(size=10, color=color, line=dict(color="#14161a", width=2)),
-        text=[format_number(v, decimals) for v in values], textposition="top center",
+        text=[format_number(v, decimals) for v in values] if len(values) <= 12 else None,
+        textposition="top center",
         textfont=dict(color=TEXT_PRIMARY),
         hovertemplate=f"<b>%{{x}}</b><br>%{{y:.{decimals}f}}<extra></extra>",
     ))
