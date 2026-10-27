@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.streamlit/secrets.toml
+.DS_Store
+Thumbs.db
+
+# Datos personales de actividades (contienen ubicación GPS)
+data/raw/fit/*.fit
+!data/raw/fit/.gitkeep

@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+filterwarnings = [
+    # fitparse usa una API de datetime obsoleta en Python 3.12+
+    "ignore::DeprecationWarning:fitparse.*",
+]
